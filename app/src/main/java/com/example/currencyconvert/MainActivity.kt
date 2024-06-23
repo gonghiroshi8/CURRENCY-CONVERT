@@ -8,9 +8,7 @@ import android.widget.EditText
 import android.widget.Spinner
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
+import kotlinx.coroutines.*
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 
@@ -74,8 +72,13 @@ class MainActivity : AppCompatActivity() {
                 return
             }
 
-            api.getRates(fromCurrency).enqueue(object : Callback<CurrencyResponse> {
-                override fun onResponse(call: Call<CurrencyResponse>, response: Response<CurrencyResponse>) {
+            // ใช้ Coroutines เพื่อทำการเรียก API แบบ Asynchronous
+            GlobalScope.launch(Dispatchers.Main) {
+                try {
+                    val response = withContext(Dispatchers.IO) {
+                        api.getRates(fromCurrency).execute()
+                    }
+
                     if (response.isSuccessful) {
                         val rates = response.body()?.rates
                         val rate = rates?.get(toCurrency)
@@ -88,12 +91,10 @@ class MainActivity : AppCompatActivity() {
                     } else {
                         resultTextView.text = "Error: ${response.message()}"
                     }
+                } catch (e: Exception) {
+                    resultTextView.text = "Failure: ${e.message}"
                 }
-
-                override fun onFailure(call: Call<CurrencyResponse>, t: Throwable) {
-                    resultTextView.text = "Failure: ${t.message}"
-                }
-            })
+            }
         } catch (e: NumberFormatException) {
             resultTextView.text = "Invalid amount"
         }
