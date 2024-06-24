@@ -3,27 +3,29 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <TextureView
+    <androidx.camera.view.PreviewView
         android:id="@+id/textureView"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:layout_alignParentTop="true"
-        android:layout_centerHorizontal="true" />
+        android:layout_height="match_parent" />
 
     <TextView
         android:id="@+id/ocrResult"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_below="@+id/textureView"
+        android:layout_alignParentBottom="true"
         android:layout_centerHorizontal="true"
         android:text="OCR Result"
-        android:textSize="18sp" />
+        android:textSize="18sp"
+        android:padding="16dp"
+        android:background="#AA000000"
+        android:textColor="#FFFFFF" />
 
     <Spinner
         android:id="@+id/spinnerCurrency"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_below="@+id/ocrResult"
+        android:layout_alignParentTop="true"
         android:layout_centerHorizontal="true"
-        android:entries="@array/currency_array" />
+        android:padding="16dp" />
+
 </RelativeLayout>

@@ -1,15 +1,25 @@
 package com.example.currencyconvert
 
+import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.util.Log
-import android.view.TextureView
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Spinner
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageProxy
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import com.example.currencyconvert.camera.CameraManagerHelper
 import com.googlecode.tesseract.android.TessBaseAPI
 import okhttp3.OkHttpClient
@@ -20,15 +30,19 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.io.File
 import java.io.FileOutputStream
+import java.nio.ByteBuffer
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 class OcrActivity : AppCompatActivity() {
-    private lateinit var textureView: TextureView
+    private lateinit var textureView: PreviewView
     private lateinit var ocrResult: TextView
     private lateinit var spinnerCurrency: Spinner
     private lateinit var tessBaseAPI: TessBaseAPI
     private var selectedCurrency: String = "USD"
 
     private lateinit var cameraManagerHelper: CameraManagerHelper
+    private lateinit var cameraExecutor: ExecutorService
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -58,15 +72,58 @@ class OcrActivity : AppCompatActivity() {
         tessBaseAPI = TessBaseAPI()
         tessBaseAPI.init(filesDir.absolutePath, "eng")
 
-        cameraManagerHelper = CameraManagerHelper(this, textureView, tessBaseAPI, ::onImageAvailable)
-        cameraManagerHelper.startCamera()
+        cameraExecutor = Executors.newSingleThreadExecutor()
+
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 1)
+        } else {
+            startCameraX()
+        }
     }
 
+    private fun startCameraX() {
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
+        cameraProviderFuture.addListener({
+            val cameraProvider = cameraProviderFuture.get()
+            val preview = Preview.Builder().build().also {
+                it.setSurfaceProvider(textureView.surfaceProvider)
+            }
 
-    private fun onImageAvailable(ocrText: String) {
-        runOnUiThread {
-            ocrResult.text = ocrText
-        }
+            val imageAnalysis = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .build()
+                .also {
+                    it.setAnalyzer(cameraExecutor, { imageProxy ->
+                        val bitmap = imageProxy.toBitmap()
+                        val text = getTextFromBitmap(bitmap)
+                        runOnUiThread {
+                            ocrResult.text = text
+                        }
+                        imageProxy.close()
+                    })
+                }
+
+            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+            try {
+                cameraProvider.unbindAll()
+                cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageAnalysis)
+            } catch (exc: Exception) {
+                Log.e("OcrActivity", "Use case binding failed", exc)
+            }
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun getTextFromBitmap(bitmap: Bitmap): String {
+        tessBaseAPI.setImage(bitmap)
+        return tessBaseAPI.utF8Text
+    }
+
+    private fun ImageProxy.toBitmap(): Bitmap {
+        val buffer: ByteBuffer = planes[0].buffer
+        val bytes = ByteArray(buffer.remaining())
+        buffer.get(bytes)
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, null)
     }
 
     private fun copyTessDataFiles() {
@@ -104,10 +161,11 @@ class OcrActivity : AppCompatActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == 1) {
             if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                cameraManagerHelper.startCamera()
+                startCameraX()
             }
         }
     }
+
     private fun fetchExchangeRates(currency: String) {
         val retrofit = Retrofit.Builder()
             .baseUrl("https://api.exchangerate-api.com/v4/latest/")
