@@ -20,7 +20,6 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.example.currencyconvert.camera.CameraManagerHelper
 import com.googlecode.tesseract.android.TessBaseAPI
 import okhttp3.OkHttpClient
 import retrofit2.Call
@@ -46,16 +45,15 @@ class OcrActivity : AppCompatActivity() {
     private lateinit var tessBaseAPI: TessBaseAPI
     private var selectedCurrency: String = "USD"
 
-    private lateinit var cameraManagerHelper: CameraManagerHelper
     private lateinit var cameraExecutor: ExecutorService
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        System.loadLibrary("opencv_java4");
+        System.loadLibrary("opencv_java4")
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_ocr)
 
         textureView = findViewById(R.id.textureView)
-        ocrResult = findViewById(R.id.ocrResult)
+        ocrResult = findViewById(R.id.ocrResult) // ตรวจสอบให้แน่ใจว่าตรงกับ XML
         spinnerCurrency = findViewById(R.id.spinnerCurrency)
 
         val currencies = arrayOf("USD", "EUR", "JPY", "GBP")
@@ -122,33 +120,43 @@ class OcrActivity : AppCompatActivity() {
     }
 
     private fun getTextFromBitmap(bitmap: Bitmap): String {
-        tessBaseAPI.setImage(bitmap)
+        // Preprocess the image
+        val preprocessedBitmap = preprocessBitmap(bitmap)
+
+        // Set Tesseract variables
+        tessBaseAPI.setVariable(TessBaseAPI.VAR_CHAR_WHITELIST, "0123456789")
+        tessBaseAPI.setPageSegMode(TessBaseAPI.PageSegMode.PSM_SINGLE_LINE)
+
+        // Perform OCR
+        tessBaseAPI.setImage(preprocessedBitmap)
         val text = tessBaseAPI.utF8Text
+
+        // Extract numbers from the OCR result
         val numberRegex = Regex("\\d+")
         val numbers = numberRegex.findAll(text).map { it.value }.joinToString("")
         return numbers
     }
 
-    private fun ImageProxy.toBitmap(): Bitmap {
-        val buffer: ByteBuffer = planes[0].buffer
-        val bytes = ByteArray(buffer.remaining())
-        buffer.get(bytes)
-        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, null)
-    }
-
     private fun preprocessBitmap(bitmap: Bitmap): Bitmap {
-        // Convert Bitmap to Mat
         val mat = Mat()
         Utils.bitmapToMat(bitmap, mat)
 
         // Convert to grayscale
         Imgproc.cvtColor(mat, mat, Imgproc.COLOR_RGB2GRAY)
 
-        // Apply Gaussian blur to reduce noise
+        // Apply Gaussian Blur
         Imgproc.GaussianBlur(mat, mat, Size(5.0, 5.0), 0.0)
 
-        // Apply adaptive thresholding to convert to black and white
+        // Apply adaptive threshold
         Imgproc.adaptiveThreshold(mat, mat, 255.0, Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C, Imgproc.THRESH_BINARY, 11, 2.0)
+
+        // Sharpen the image
+        val kernel = Mat(3, 3, CvType.CV_16SC1)
+        kernel.put(0, 0,
+            0.0, -1.0, 0.0,
+            -1.0, 5.0, -1.0,
+            0.0, -1.0, 0.0)
+        Imgproc.filter2D(mat, mat, mat.depth(), kernel)
 
         // Convert back to Bitmap
         val preprocessedBitmap = Bitmap.createBitmap(mat.cols(), mat.rows(), Bitmap.Config.ARGB_8888)
@@ -156,6 +164,7 @@ class OcrActivity : AppCompatActivity() {
 
         return preprocessedBitmap
     }
+
 
     private fun copyTessDataFiles() {
         val assetManager = assets
@@ -190,10 +199,10 @@ class OcrActivity : AppCompatActivity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 1) {
-            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                startCameraX()
-            }
+        if (requestCode == 1 && grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            startCameraX()
+        } else {
+            Log.e("OcrActivity", "Camera permission denied")
         }
     }
 
@@ -224,4 +233,18 @@ class OcrActivity : AppCompatActivity() {
             }
         })
     }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        tessBaseAPI.end()
+        cameraExecutor.shutdown()
+    }
+}
+
+// Extension function to convert ImageProxy to Bitmap
+private fun ImageProxy.toBitmap(): Bitmap {
+    val buffer: ByteBuffer = planes[0].buffer
+    val bytes = ByteArray(buffer.remaining())
+    buffer.get(bytes)
+    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
 }
